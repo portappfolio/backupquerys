@@ -1,5 +1,5 @@
 with series as (
-  select 
+  select distinct
       trim(b.RFC) rfc
       , trim(b.Email_1) email
       , b.CLASIFICACION_RFC
@@ -33,6 +33,7 @@ with series as (
 )
 
 , cmp as (
+  select * from (
   select 
         s.*
         , case when not nullif(trim(cmp.cmp_code),'') is null then true else false end cruce_synergy
@@ -42,11 +43,13 @@ with series as (
         , cmp.cmp_e_mail email_synergy
         , cmp.cmp_tel telefono_synergy
         , cmp.cmp_fcity ciudad_synergy
+        , row_number() over(partition by trim(s.rfc) order by date(cmp.syscreated) desc) rown_cmp
         
   from series s
   left join db_synergy.tbl_brz_cicmpy cmp
     on trim(s.rfc) = trim(cmp.debcode)
     and trim(cmp.cmp_fctry) = 'MX'
+  ) where rown_cmp = 1
 )
 
 , tcn as (
@@ -98,7 +101,7 @@ with series as (
           , date(tcn.EndDate) cierre_estimado_onboarding_tcn
           , tcn.FreeDateField_02 inicio_futuro_tcn
           , tcn.FreeNumberField_04 csat_tcn
-          , row_number() over(partition by tcn.CustomerID order by date(tcn.syscreated) desc) rown_tcn
+          , row_number() over(partition by cmp.rfc order by date(tcn.syscreated) desc) rown_tcn
 
     from 
     cmp 
@@ -310,7 +313,9 @@ select distinct
         , fecha_ult_activacion
         , fecha_compra
         , fecha_ini
+        , left(fecha_ini,7) anno_mes_inicio
         , fecha_fin
+        , left(fecha_fin,7) anno_mes_fin
         , razon_social
         , num_distribuidor
         , rfc_distribuidor
@@ -376,16 +381,22 @@ select distinct
   from cruce_market_serial
 )
 
-select 
-          *
-          , case when coalesce(uso_historico,0) > 0 then 1 else 0 end con_uso_historico
-          , case when coalesce(uso_60_abr_2023,0) > 0 then 1 else 0 end con_uso_60_abr_2023
-          , case when coalesce(uso_60_may_2023,0) > 0 then 1 else 0 end con_uso_60_may_2023
-          , case when coalesce(uso_60_jun_2023,0) > 0 then 1 else 0 end con_uso_60_jun_2023
-          , case when coalesce(uso_60_jul_2023,0) > 0 then 1 else 0 end con_uso_60_jul_2023
-          , case when coalesce(uso_60_ago_2023,0) > 0 then 1 else 0 end con_uso_60_ago_2023
-          , case when coalesce(uso_60_sep_2023,0) > 0 then 1 else 0 end con_uso_60_sep_2023
-          , case when coalesce(uso_60_oct_2023,0) > 0 then 1 else 0 end con_uso_60_oct_2023
-          , case when coalesce(uso_60_nov_2023,0) > 0 then 1 else 0 end con_uso_60_nov_2023
+, final as (
+  select 
+            *
+            , case when coalesce(uso_historico,0) > 0 then 1 else 0 end con_uso_historico
+            , case when coalesce(uso_60_abr_2023,0) > 0 then 1 else 0 end con_uso_60_abr_2023
+            , case when coalesce(uso_60_may_2023,0) > 0 then 1 else 0 end con_uso_60_may_2023
+            , case when coalesce(uso_60_jun_2023,0) > 0 then 1 else 0 end con_uso_60_jun_2023
+            , case when coalesce(uso_60_jul_2023,0) > 0 then 1 else 0 end con_uso_60_jul_2023
+            , case when coalesce(uso_60_ago_2023,0) > 0 then 1 else 0 end con_uso_60_ago_2023
+            , case when coalesce(uso_60_sep_2023,0) > 0 then 1 else 0 end con_uso_60_sep_2023
+            , case when coalesce(uso_60_oct_2023,0) > 0 then 1 else 0 end con_uso_60_oct_2023
+            , case when coalesce(uso_60_nov_2023,0) > 0 then 1 else 0 end con_uso_60_nov_2023
 
-from semifinal
+  from semifinal
+)
+
+select *
+      -- distinct 
+from final
