@@ -32,7 +32,8 @@ with series as (
   and b.PRODUCTO = 'SIIGO_NUBE'
 )
 
-, cmp as (
+
+, previa_cmp as (
   select * from (
   select 
         s.*
@@ -43,13 +44,61 @@ with series as (
         , cmp.cmp_e_mail email_synergy
         , cmp.cmp_tel telefono_synergy
         , cmp.cmp_fcity ciudad_synergy
-        , row_number() over(partition by trim(s.rfc) order by date(cmp.syscreated) desc) rown_cmp
+        , row_number() over(partition by trim(s.rfc) order by trim(cmp.cmp_code) asc) rown_cmp
         
   from series s
   left join db_synergy.tbl_brz_cicmpy cmp
     on trim(s.rfc) = trim(cmp.debcode)
     and trim(cmp.cmp_fctry) = 'MX'
   ) where rown_cmp = 1
+)
+
+, contratos as (
+  select cs.serial
+          , cs.item_code
+          , cs.ITEM_DESCRIPTION
+  from
+  (
+    select 
+          trim(cs.serial) serial
+          , cs.ITEM_CODE
+          , cs.ITEM_DESCRIPTION
+          , row_number() over(partition by trim(cs.serial) order by date(cs.start_date) desc) rown_contratos
+    from previa_cmp cmp
+    inner join db_synergy.tbl_slv_contratos_synergy cs
+      on cmp.serial = trim(cs.SERIAL)
+    where 
+    cs.ASSORTMENT_CODE = 951
+    and cs.ESTADO_PRODUCTO = 'Activo'
+    and not cs.ITEM_CODE in ('9510003000010')
+  ) cs
+  where cs.rown_contratos = 1
+)
+
+, acompanamiento as (
+    select 
+          distinct cs.serial
+    from 
+    previa_cmp cmp
+    inner join db_synergy.tbl_slv_contratos_synergy cs
+      on cmp.serial = trim(cs.SERIAL)
+    where 
+    cs.ASSORTMENT_CODE = 951
+    and cs.ESTADO_PRODUCTO = 'Activo'
+    and cs.ITEM_CODE in ('9510003000010')
+)
+
+, cmp as (
+  select cmp.*
+        , cs.item_code cod_producto_contratos
+        , cs.ITEM_DESCRIPTION producto_contratos
+        , case when not a.serial is null then true else false end pago_acompanamiento
+  
+  from previa_cmp cmp
+  left join contratos cs 
+    on cmp.serial = cs.serial
+  left join acompanamiento a
+    on cmp.serial = a.serial
 )
 
 , tcn as (
@@ -108,6 +157,7 @@ with series as (
     left join db_synergy.tbl_brz_absences tcn
       on cmp.customer_id_synergy = tcn.CustomerID
       and tcn.type = 2101
+      and not tcn.FreeTextField_01 in ('NOI','COI','SAE')
     left join db_synergy.tbl_brz_humres hr
       on tcn.EmpID = hr.res_id
     left join db_synergy.tbl_brz_humres hrl
@@ -183,14 +233,14 @@ select distinct
       , ct.CloudTenantCompanyKey companykey_market
       , ct.PlanType plantype_market
       , case 
-            when ct.PlanType =  24 then 'Total Inicio'
-            when ct.PlanType =  23 then 'Total avanzando'
-            when ct.PlanType =  14 then 'Total premium'
-            when ct.PlanType =  17 then 'Gestión Premium'
-            when ct.PlanType =  21 then 'Gestión Avanzado'
-            when ct.PlanType =  22 then 'Gestión Inicio'
-            when ct.PlanType =  20 then 'Facturación'
-            when ct.PlanType =  20 then 'Facturación DUO'
+            when ct.PlanType =  24 then 'Siigo Nube Total Inicio'
+            when ct.PlanType =  23 then 'Siigo Nube Total Avanzado'
+            when ct.PlanType =  14 then 'Siigo Nube Total Premium'
+            when ct.PlanType =  17 then 'Siigo Nube Gestión Premium'
+            when ct.PlanType =  21 then 'Siigo Nube Gestión Avanzado'
+            when ct.PlanType =  22 then 'Siigo Nube Gestión Inicio'
+            when ct.PlanType =  20 then 'Siigo Nube Facturación'
+            when ct.PlanType =  20 then 'Siigo Nube Facturación Duo'
         else 'Sin Identificar' end tipo_producto_market
       , date(ct.CreateByDate) creacion_market
       , date(ct.UpdateByDate) actualizacion_market
@@ -219,8 +269,15 @@ select distinct
       , m.serial_market
       , m.rfc_market
       , m.estado_market
-      , count(ac.ACEntryID) uso_historico
+      
       , max(date(ac.CreatedByDate)) ultimo_uso
+
+      , count(ac.ACEntryID) uso_historico
+      , count(case when date(ac.CreatedByDate) between dateadd(now(),-60 ) and date(now()) then ac.ACEntryID else null end) uso_60
+      , count(case when date(ac.CreatedByDate) between dateadd(now(),-90 ) and date(now()) then ac.ACEntryID else null end) uso_90
+      , count(case when date(ac.CreatedByDate) between dateadd(now(),-180 ) and date(now()) then ac.ACEntryID else null end) uso_180
+      , count(case when date(ac.CreatedByDate) between dateadd(now(),-270 ) and date(now()) then ac.ACEntryID else null end) uso_270
+
       , count(case when left(date(ac.CreatedByDate),7) in ('2023-03', '2023-04') then ac.ACEntryID else null end) uso_60_abr_2023
       , count(case when left(date(ac.CreatedByDate),7) in ('2023-04', '2023-05') then ac.ACEntryID else null end) uso_60_may_2023
       , count(case when left(date(ac.CreatedByDate),7) in ('2023-05', '2023-06') then ac.ACEntryID else null end) uso_60_jun_2023
@@ -265,6 +322,10 @@ select distinct
         , estado_market estado_market_serial
         , uso_historico uso_historico_serial
         , ultimo_uso ultimo_uso_serial
+        , uso_60 uso_60_serial
+        , uso_90 uso_90_serial
+        , uso_180 uso_180_serial
+        , uso_270 uso_270_serial
         , uso_60_abr_2023 uso_60_abr_2023_serial
         , uso_60_may_2023 uso_60_may_2023_serial
         , uso_60_jun_2023 uso_60_jun_2023_serial
@@ -303,10 +364,12 @@ select distinct
   select 
         rfc
         , email
-        , clasificacion_rfc estado_central
+        , clasificacion_rfc estado
         , clasificacion_canal
-        , numserie serie_central
+        , numserie serie
         , periodicidad
+        , producto_contratos
+        , pago_acompanamiento
         , actualizacion_cfdi
         , usuarios
         , version_sistema
@@ -351,10 +414,12 @@ select distinct
         , cant_sesiones
         , horas_sesiones
         , dias_entre_sesiones
-        -- , coalesce(ultimo_uso,date('1999-12-01')) urfc
-        -- , coalesce(ultimo_uso_serial,date('1999-12-01')) userial
-        -- , ultimo_uso
-        -- , ultimo_uso_serial
+        
+        , case when coalesce(ultimo_uso,ultimo_uso_serial) is null then 0 when coalesce(ultimo_uso,date('1999-12-01')) >= coalesce(ultimo_uso_serial,date('1999-12-01')) then coalesce(uso_60,0) else coalesce(uso_60_serial,0) end uso_60
+        , case when coalesce(ultimo_uso,ultimo_uso_serial) is null then 0 when coalesce(ultimo_uso,date('1999-12-01')) >= coalesce(ultimo_uso_serial,date('1999-12-01')) then coalesce(uso_90,0) else coalesce(uso_90_serial,0) end uso_90
+        , case when coalesce(ultimo_uso,ultimo_uso_serial) is null then 0 when coalesce(ultimo_uso,date('1999-12-01')) >= coalesce(ultimo_uso_serial,date('1999-12-01')) then coalesce(uso_180,0) else coalesce(uso_180_serial,0) end uso_180
+        , case when coalesce(ultimo_uso,ultimo_uso_serial) is null then 0 when coalesce(ultimo_uso,date('1999-12-01')) >= coalesce(ultimo_uso_serial,date('1999-12-01')) then coalesce(uso_270,0) else coalesce(uso_270_serial,0) end uso_270
+
         , case when coalesce(ultimo_uso,ultimo_uso_serial) is null and cloudtenantid_market is null and cloudtenantid_market_serial is null then 'No Cruza' when coalesce(ultimo_uso,date('1999-12-01')) >= coalesce(ultimo_uso_serial,date('1999-12-01')) then 'RFC' else 'Serial' end cruce_market
         , case when coalesce(ultimo_uso,ultimo_uso_serial) is null then coalesce(cloudtenantid_market,cloudtenantid_market_serial) when coalesce(ultimo_uso,date('1999-12-01')) >= coalesce(ultimo_uso_serial,date('1999-12-01')) then cloudtenantid_market else cloudtenantid_market_serial end cloudtenantid_market
         , case when coalesce(ultimo_uso,ultimo_uso_serial) is null then coalesce(tenantid_market,tenantid_market_serial) when coalesce(ultimo_uso,date('1999-12-01')) >= coalesce(ultimo_uso_serial,date('1999-12-01')) then tenantid_market else tenantid_market_serial end tenantid_market
@@ -383,8 +448,101 @@ select distinct
 
 , final as (
   select 
-            *
+            rfc
+            , estado
+            , serie
+            , periodicidad
+            , case 
+                  when coalesce(producto_contratos, tipo_producto_market) ilike '%Facturación%' then 'Facturación'
+                  when coalesce(producto_contratos, tipo_producto_market) ilike '%Gestión%' then 'Gestión'
+                  when coalesce(producto_contratos, tipo_producto_market) ilike '%Total%' then 'Total'
+            end tier_producto
+            , coalesce(producto_contratos, tipo_producto_market) producto
+            , pago_acompanamiento
+            --, actualizacion_cfdi
+            , usuarios
+            --, version_sistema
+            , fecha_ult_activacion
+            , fecha_compra
+            , fecha_ini
+            , anno_mes_inicio
+            , fecha_fin
+            , anno_mes_fin
+            , razon_social
+            , coalesce(nullif(email,''), nullif(email_synergy,'')) email
+            , telefono_synergy
+
+            , clasificacion_canal
+            , num_distribuidor
+            , rfc_distribuidor
+            , num_poliza
+
+            , cruce_synergy
+            , serial
+            , customer_id_synergy
+            , plan_synergy
+            , ciudad_synergy
+            , con_tcn
+            , id_tcn
+            , hid_tcn
+            , asesor_tcn
+            , email_asesor_tcn
+            , supervisor_tcn
+            , email_supervisor_tcn
+            , producto_tcn
+            , inicio_tcn
+            , cierre_tcn
+            , dias_tcn
+            , estado_tcn
+            , avance_tcn
+            , modulo_actual_tcn
+            , inicio_onboarding_tcn
+            , cierre_estimado_onboarding_tcn
+            , inicio_futuro_tcn
+            , csat_tcn
+
+            , con_sesiones
+            , ultima_sesion
+            , tipo_ultima_sesion
+            , cant_sesiones
+            , horas_sesiones
+            , dias_entre_sesiones
+            
+            
+            , cruce_market
+            , cloudtenantid_market
+            , tenantid_market
+            , companykey_market
+            , plantype_market
+            , creacion_market
+            , actualizacion_market
+            , serial_market
+            , rfc_market
+            , estado_market
+
+            , ultimo_uso
+            
+            , uso_60
+            , uso_90
+            , uso_180
+            , uso_270
+            , uso_historico
+
+            , case when coalesce(uso_60,0) > 0 then 1 else 0 end con_uso_60
+            , case when coalesce(uso_90,0) > 0 then 1 else 0 end con_uso_90
+            , case when coalesce(uso_180,0) > 0 then 1 else 0 end con_uso_180
+            , case when coalesce(uso_270,0) > 0 then 1 else 0 end con_uso_270
             , case when coalesce(uso_historico,0) > 0 then 1 else 0 end con_uso_historico
+
+            , uso_60_abr_2023
+            , uso_60_may_2023
+            , uso_60_jun_2023
+            , uso_60_jul_2023
+            , uso_60_ago_2023
+            , uso_60_sep_2023
+            , uso_60_oct_2023
+            , uso_60_nov_2023
+            
             , case when coalesce(uso_60_abr_2023,0) > 0 then 1 else 0 end con_uso_60_abr_2023
             , case when coalesce(uso_60_may_2023,0) > 0 then 1 else 0 end con_uso_60_may_2023
             , case when coalesce(uso_60_jun_2023,0) > 0 then 1 else 0 end con_uso_60_jun_2023
@@ -397,6 +555,6 @@ select distinct
   from semifinal
 )
 
-select *
-      -- distinct 
+select 
+      *
 from final
